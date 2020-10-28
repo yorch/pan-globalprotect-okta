@@ -1,4 +1,7 @@
-FROM alpine:3 AS builder
+###############################################################################################
+# OpenConnect Builder
+###############################################################################################
+FROM alpine:3 AS openConnectBuilder
 
 RUN apk add --no-cache \
 	automake \
@@ -10,6 +13,7 @@ RUN apk add --no-cache \
 	libtool \
 	libproxy-dev \
 	libxml2-dev \
+	lz4-dev \
 	make \
 	musl-dev \
 	openssl-dev \
@@ -18,7 +22,7 @@ RUN apk add --no-cache \
 ENV VPNC_SCRIPT_PATH=/usr/local/sbin/vpnc-script
 
 RUN mkdir -p /usr/local/sbin \
-	&& curl -o ${VPNC_SCRIPT_PATH} http://git.infradead.org/users/dwmw2/vpnc-scripts.git/blob_plain/HEAD:/vpnc-script \
+	&& curl -s -o ${VPNC_SCRIPT_PATH} http://git.infradead.org/users/dwmw2/vpnc-scripts.git/blob_plain/HEAD:/vpnc-script \
 	&& chmod +x ${VPNC_SCRIPT_PATH}
 
 ENV OPENCONNECT_VERSION=v8.10
@@ -34,21 +38,41 @@ RUN cd /tmp \
 	&& make install
 
 ###############################################################################################
+# App Builder
+###############################################################################################
+FROM python:3.8-alpine as appBuilder
+
+WORKDIR /app
+
+RUN apk add --no-cache \
+	gcc \
+	libc-dev \
+	libxslt \
+	libxslt-dev \
+	py3-lxml
+
+COPY requirements.txt .
+
+RUN pip wheel \
+	--no-cache-dir \
+	--no-deps \
+	--wheel-dir /app/wheels \
+	-r requirements.txt
+
+###############################################################################################
 # Final image
 ###############################################################################################
 FROM python:3.8-alpine
 
-COPY --from=builder /usr/local/sbin/openconnect /usr/local/sbin/
-COPY --from=builder /usr/local/sbin/vpnc-script /usr/local/sbin/
+COPY --from=openConnectBuilder /usr/local/sbin/openconnect /usr/local/sbin/
+COPY --from=openConnectBuilder /usr/local/sbin/vpnc-script /usr/local/sbin/
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY --from=appBuilder /app/wheels           /wheels
+COPY --from=appBuilder /app/requirements.txt .
 
-RUN apk add --no-cache --virtual .build-deps gcc libc-dev libxslt-dev \
-	&& apk add --no-cache libxslt py3-lxml \
-	&& pip install -r requirements.txt --no-cache-dir \
-	&& apk del .build-deps
+RUN pip install --no-cache /wheels/*
 
 COPY gp-okta.py .
 
