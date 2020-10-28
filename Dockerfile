@@ -1,25 +1,55 @@
-FROM	alpine:3.10
+FROM alpine:3 AS builder
 
-WORKDIR	/
+RUN apk add --no-cache \
+	automake \
+	autoconf \
+	curl \
+	gcc \
+	gettext \
+	git \
+	libtool \
+	libproxy-dev \
+	libxml2-dev \
+	make \
+	musl-dev \
+	openssl-dev \
+	linux-headers
 
-RUN	apk update && apk add --no-cache \
-	curl git \
-	automake autoconf libtool gcc musl-dev make linux-headers \
-	gettext openssl-dev libxml2-dev lz4-dev libproxy-dev \
-	py2-lxml py2-requests py2-pip \
-	&& rm -rf /var/cache/apk/*
-RUN  pip install pyotp
+ENV VPNC_SCRIPT_PATH=/usr/local/sbin/vpnc-script
 
+RUN mkdir -p /usr/local/sbin \
+	&& curl -o ${VPNC_SCRIPT_PATH} http://git.infradead.org/users/dwmw2/vpnc-scripts.git/blob_plain/HEAD:/vpnc-script \
+	&& chmod +x ${VPNC_SCRIPT_PATH}
 
-RUN	mkdir -p /usr/local/sbin
-RUN	curl -o /usr/local/sbin/vpnc-script http://git.infradead.org/users/dwmw2/vpnc-scripts.git/blob_plain/HEAD:/vpnc-script
-RUN	chmod +x /usr/local/sbin/vpnc-script
+ENV OPENCONNECT_VERSION=v8.10
+ENV OPENCONNECT_REPO=https://gitlab.com/openconnect/openconnect.git
 
-RUN	git clone -b "v8.10" --single-branch --depth=1 https://gitlab.com/openconnect/openconnect.git
-WORKDIR	/openconnect
-RUN	./autogen.sh
-RUN	./configure --without-gnutls --with-vpnc-script=/usr/local/sbin/vpnc-script
-RUN	make check
-RUN	make
+RUN cd /tmp \
+	&& git clone -b "${OPENCONNECT_VERSION}" --single-branch --depth=1 ${OPENCONNECT_REPO} \
+	&& cd openconnect \
+	&& ./autogen.sh \
+	&& ./configure --without-gnutls --with-vpnc-script=${VPNC_SCRIPT_PATH} \
+	&& make check \
+	&& make \
+	&& make install
 
-CMD	["/openconnect/gp-okta/gp-okta.py","/openconnect/gp-okta/gp-okta.conf"]
+###############################################################################################
+# Final image
+###############################################################################################
+FROM python:3.8-alpine
+
+COPY --from=builder /usr/local/sbin/openconnect /usr/local/sbin/
+COPY --from=builder /usr/local/sbin/vpnc-script /usr/local/sbin/
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN apk add --no-cache --virtual .build-deps gcc libc-dev libxslt-dev \
+	&& apk add --no-cache libxslt py3-lxml \
+	&& pip install -r requirements.txt --no-cache-dir \
+	&& apk del .build-deps
+
+COPY gp-okta.py .
+
+CMD ["./gp-okta.py", "/config/gp-okta.conf"]

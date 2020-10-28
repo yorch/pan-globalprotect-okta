@@ -47,8 +47,7 @@ if [[ -z "${conf_password}" && -z "${GP_PASSWORD}" ]]; then
     read -s -p "Enter Okta password: " GP_PASSWORD
 fi
 
-echo
-
+echo "Starting Docker container"
 
 docker run \
     -d \
@@ -60,5 +59,5 @@ docker run \
     -e GP_PASSWORD=${GP_PASSWORD} \
     -e GP_USERNAME=${GP_USERNAME} \
     -v /etc/resolv.conf:/etc/resolv.conf \
-    -v ${PWD}:/openconnect/gp-okta \
+    -v ${PWD}/gp-okta.conf:/config/gp-okta.conf \
     gp-okta
